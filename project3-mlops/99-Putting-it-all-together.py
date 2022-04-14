@@ -66,6 +66,14 @@ display(airbnbDF)
 # COMMAND ----------
 
 # TODO
+#remove dollar sign
+airbnbDF['price'] = airbnbDF['price'].str.replace('$', '')
+#remove comma 
+airbnbDF['price'] = airbnbDF['price'].str.replace(',', '')
+#convert price column data type from string to float 
+airbnbDF['price'] = airbnbDF['price'].astype('float64')
+
+
 
 # COMMAND ----------
 
@@ -77,6 +85,17 @@ display(airbnbDF)
 # COMMAND ----------
 
 # TODO
+import seaborn as sns
+#display the data types 
+print(airbnbDF.dtypes)
+#create a heap map 
+sns.heatmap( airbnbDF.corr())
+#from the correlation heatmap, it seems like price only have relatively closer relation to 
+#accomodates, bathrooms, bedrooms, beds. However, for categorical features, we can eliminate "zipcode", "bedtype", "neighbourhood_cleansed",
+#"property type "
+#keeping the features which are useful 
+airbnbDF = airbnbDF[["beds","bedrooms","bathrooms","accommodates","room_type","instant_bookable","cancellation_policy","host_is_superhost","price"]]
+display(airbnbDF)
 
 # COMMAND ----------
 
@@ -87,6 +106,21 @@ display(airbnbDF)
 # COMMAND ----------
 
 # TODO
+from sklearn.preprocessing import OneHotEncoder
+#I decided to use one hot encoding for categorical variables 
+#first drop nas 
+airbnbDF = airbnbDF.dropna()
+# then create encoder
+encoder = OneHotEncoder(handle_unknown='ignore')
+#create the encoder df 
+encoder_df = pd.DataFrame(encoder.fit_transform(airbnbDF.select_dtypes(exclude=["number"])).toarray())
+#give column names for encoder df 
+encoder_df.columns = encoder.get_feature_names_out(['room_type','instant_bookable', 'cancellation_policy', 'host_is_superhost'])
+# join the main df and the encoder df 
+airbnbDF = airbnbDF.select_dtypes("number")
+airbnbDF = pd.concat([airbnbDF,encoder_df],axis=1)
+display(airbnbDF)
+
 
 # COMMAND ----------
 
@@ -99,6 +133,13 @@ display(airbnbDF)
 
 # TODO
 from sklearn.model_selection import train_test_split
+#check if the column is numerical 
+print(airbnbDF.dtypes)
+#X and y for training and testing 
+X = airbnbDF[airbnbDF.columns.drop('price')]
+y = airbnbDF["price"]
+#perform train test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
 
 # COMMAND ----------
@@ -119,6 +160,27 @@ from sklearn.model_selection import train_test_split
 # COMMAND ----------
 
 # TODO
+import numpy as np
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
+#save the column name for later usage
+columns = X_train.columns
+
+#checking missing values 
+print(X_train.isnull().sum())
+#create a simple imputer 
+imp = SimpleImputer(missing_values=np.nan, strategy='mean')
+#perform data imputation for the training set X
+X_train = X_train.fillna(X_train.mean())
+X_test = X_test.fillna(X_test.mean())
+y_train = y_train.fillna(y_train.mean())
+y_test = y_test.fillna(y_test.mean())
+
+#creating model 
+rr = Ridge(alpha = 1,max_iter =100,solver= "auto",random_state=42)
+#fitting the model
+rr.fit(X_train, y_train)
+
 
 # COMMAND ----------
 
@@ -128,6 +190,11 @@ from sklearn.model_selection import train_test_split
 # COMMAND ----------
 
 # TODO
+from sklearn.metrics import mean_absolute_error
+#first get the preidction 
+predictions = rr.predict(X_test)
+#use mean absolute error for metric to evaluate the model
+mae = mean_absolute_error(y_test, predictions)
 
 # COMMAND ----------
 
@@ -139,6 +206,29 @@ from sklearn.model_selection import train_test_split
 
 # TODO
 import mlflow.sklearn
+
+with mlflow.start_run(run_name="ridge_regression_run_02") as run:
+    #creating the model
+    rr = Ridge(alpha = 20,max_iter =1000,solver= "auto",random_state=42)
+    #fitting the model
+    rr.fit(X_train, y_train)
+    #make predictions 
+    predictions = rr.predict(X_test)
+    
+    # Log model
+    mlflow.sklearn.log_model(rr, "ridge_regression_model_01")
+    
+    ## Log metrics
+    mae = mean_absolute_error(y_test, predictions)
+    mlflow.log_metric("mae", mae)
+    
+    ##log hyperparameters 
+    mlflow.log_params(rr.get_params())
+    
+    runID = run.info.run_uuid
+    experimentID = run.info.experiment_id
+    
+    
 
 
 # COMMAND ----------
@@ -157,6 +247,15 @@ import mlflow.sklearn
 
 # TODO
 import mlflow.pyfunc
+#uri of the best model 
+uri = 'runs:/578ceb2b00e4468d8e5c26ae48e69274/ridge_regression_model_01'
+#load model
+loaded_model = mlflow.pyfunc.load_model(uri)
+
+
+# COMMAND ----------
+
+loaded_model.predict(X_test)
 
 # COMMAND ----------
 
@@ -183,6 +282,14 @@ class Airbnb_Model(mlflow.pyfunc.PythonModel):
     
     def predict(self, context, model_input):
         # FILL_IN
+        #grab accommodates column
+        accommodates = model_input["accommodates"].to_numpy()
+        #make prediction using training data
+        prediction = self.model.predict(model_input)
+        #for the result, we need to divide each pricing with corresponding accommodates 
+        result = np.divide(prediction, accommodates)
+        return result
+        
 
 
 # COMMAND ----------
@@ -196,6 +303,11 @@ class Airbnb_Model(mlflow.pyfunc.PythonModel):
 final_model_path =  f"{working_path}/final-model"
 
 # FILL_IN
+#create the aribnb model 
+final_model = Airbnb_Model(loaded_model)
+#save the model into the path
+mlflow.pyfunc.save_model(path=final_model_path, python_model=final_model)
+
 
 # COMMAND ----------
 
@@ -205,6 +317,15 @@ final_model_path =  f"{working_path}/final-model"
 # COMMAND ----------
 
 # TODO
+#load the model 
+load_model = mlflow.pyfunc.load_model(final_model_path)
+#grad X_test as input 
+model_input = X_test
+#make prediction 
+prediction = load_model.predict(model_input)
+print(prediction)
+
+
 
 # COMMAND ----------
 
@@ -223,10 +344,10 @@ final_model_path =  f"{working_path}/final-model"
 # COMMAND ----------
 
 # TODO
-save the testing data 
+#save the testing data 
 test_data_path = f"{working_path}/test_data.csv"
 # FILL_IN
-
+X_test.to_csv(test_data_path,index=False)
 prediction_path = f"{working_path}/predictions.csv"
 
 # COMMAND ----------
@@ -249,8 +370,15 @@ import pandas as pd
 @click.option("--prediction_path", default="", type=str)
 def model_predict(final_model_path, test_data_path, prediction_path):
     # FILL_IN
-
-
+    #load model
+    final_model = mlflow.pyfunc.load_model(final_model_path)
+    #predict
+    model_input = pd.read_csv(test_data_path)
+    predictions = final_model.predict(model_input)
+    #save prediction
+    predict = pd.DataFrame(predictions,columns=["results"])
+    predict.to_csv(prediction_path,index=False)
+    
 # test model_predict function    
 demo_prediction_path = f"{working_path}/predictions.csv"
 
@@ -259,7 +387,6 @@ runner = CliRunner()
 result = runner.invoke(model_predict, ['--final_model_path', final_model_path, 
                                        '--test_data_path', test_data_path,
                                        '--prediction_path', demo_prediction_path], catch_exceptions=True)
-
 assert result.exit_code == 0, "Code failed" # Check to see that it worked
 print("Price per person predictions: ")
 print(pd.read_csv(demo_prediction_path))
@@ -268,6 +395,10 @@ print(pd.read_csv(demo_prediction_path))
 
 # MAGIC %md
 # MAGIC Next, we will create a MLproject file and put it under our `workingDir`. Complete the parameters and command of the file.
+
+# COMMAND ----------
+
+# MAGIC %sh ls /dbfs/user/rzhou15@u.rochester.edu/mlflow/99_putting_it_all_together_psp/final-model/
 
 # COMMAND ----------
 
@@ -281,13 +412,11 @@ conda_env: conda.yaml
 entry_points:
   main:
     parameters:
-      #FILL_IN
-    command:  "python predict.py #FILL_IN"
+      final_model_path: {type: str, default: ""}
+      test_data_path: {type: str, default: ""}
+      prediction_path: {type: str, default: ""}
+    command:  "python predict.py --final_model_path {final_model_path} --test_data_path {test_data_path} --prediction_path {prediction_path}"
 '''.strip(), overwrite=True)
-
-# COMMAND ----------
-
-print(prediction_path)
 
 # COMMAND ----------
 
@@ -337,6 +466,20 @@ import mlflow.pyfunc
 import pandas as pd
 
 # put model_predict function with decorators here
+@click.command()
+@click.option("--final_model_path", default="", type=str)
+@click.option("--test_data_path", default="", type=str)
+@click.option("--prediction_path", default="", type=str)
+def model_predict(final_model_path, test_data_path, prediction_path):
+    #load model
+    final_model = mlflow.pyfunc.load_model(final_model_path)
+    #predict
+    model_input = pd.read_csv(test_data_path)
+    predictions = final_model.predict(model_input)
+    #save prediction
+    predict = pd.DataFrame(predictions,columns=["results"])
+    predict.to_csv(prediction_path,index=False)
+
     
 if __name__ == "__main__":
   model_predict()
@@ -357,6 +500,10 @@ display( dbutils.fs.ls(workingDir) )
 
 # COMMAND ----------
 
+# MAGIC %sh ls /dbfs/user/rzhou15@u.rochester.edu/mlflow/99_putting_it_all_together_psp
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC Under **`workingDir`** is your completely packaged project.
 # MAGIC 
@@ -366,9 +513,12 @@ display( dbutils.fs.ls(workingDir) )
 
 # TODO
 second_prediction_path = f"{working_path}/predictions-2.csv"
-mlflow.projects.run(working_path,
-   # FILL_IN
-)
+mlflow.projects.run(uri=working_path,
+    parameters={
+        "final_model_path": final_model_path,
+        "test_data_path": test_data_path, 
+        "prediction_path": second_prediction_path
+    })
 
 # COMMAND ----------
 

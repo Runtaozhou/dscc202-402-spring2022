@@ -240,6 +240,10 @@ loaded_model = mlflow.pyfunc.load_model(model_path)
 
 # COMMAND ----------
 
+print(model_path)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC Evaluate the model.
 

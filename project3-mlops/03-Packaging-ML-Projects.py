@@ -153,6 +153,12 @@ working_path = workingDir.replace("dbfs:", "/dbfs")
 
 # COMMAND ----------
 
+# MAGIC 
+# MAGIC 
+# MAGIC 
+# MAGIC 
+# MAGIC 
+# MAGIC 
 # MAGIC %md-sandbox
 # MAGIC Create the `MLproject` file.  This is the heart of an MLflow project.  It includes pointers to the conda environment and a `main` entry point, which is backed by the file `train.py`.
 # MAGIC 
@@ -316,6 +322,10 @@ mlflow.projects.run(working_path,
 
 # COMMAND ----------
 
+display( dbutils.fs.ls(workingDir) )
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC How did the new model do?
 
@@ -330,7 +340,7 @@ mlflow.projects.run(working_path,
 
 # clusterspecs = {
 #     "num_workers": 2,
-#     "spark_version": "5.2.x-scala2.11",
+#     "spark_version": "5.2.x-scala2.12",
 #     "spark_conf": {},
 #     "aws_attributes": {
 #         "first_on_demand": 1,
@@ -343,17 +353,18 @@ mlflow.projects.run(working_path,
 #     "driver_node_type_id": "i3.xlarge"
 #   }
 
-# mlflow.projects.run(
-#   uri=working_path,
-#   parameters={
-#     "data_path": "/dbfs/mnt/training/airbnb/sf-listings/airbnb-cleaned-mlflow.csv",
-#     "n_estimators": 1500,
-#     "max_depth": 5,
-#     "max_features": "sqrt"
-# },
+mlflow.projects.run(
+  uri=working_path,
+  parameters={
+    "data_path": "/dbfs/mnt/training/airbnb/sf-listings/airbnb-cleaned-mlflow.csv",
+    "n_estimators": 1500,
+    "max_depth": 5,
+    "max_features": "sqrt"
+}
+#   ,
 #   backend="databricks",
 #   backend_config=clusterspecs
-# )
+)
 
 # COMMAND ----------
 
